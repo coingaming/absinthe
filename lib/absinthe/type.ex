@@ -471,4 +471,8 @@ defmodule Absinthe.Type do
   defp referenced_types(type, schema, acc) when is_atom(type) and type != nil do
     referenced_types(Schema.lookup_type(schema, type), schema, acc)
   end
+
+  defp referenced_types(nil, schema, acc) do
+    acc
+  end
 end

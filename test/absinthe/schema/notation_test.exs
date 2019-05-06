@@ -220,6 +220,50 @@ defmodule Absinthe.Schema.NotationTest do
 
       assert [:email, :name] = Dest.__absinthe_type__(:baz).fields |> Map.keys() |> Enum.sort()
     end
+
+    test "can import fields from imported types with prefix only" do
+      defmodule Source1 do
+        use Absinthe.Schema
+  
+        query do
+          # Query type must exist
+        end
+  
+        object :foo do
+          field :name, :string
+        end
+      end
+  
+      defmodule Source2 do
+        use Absinthe.Schema
+  
+        query do
+          # Query type must exist
+        end
+  
+        object :bar do
+          field :email, :string
+        end
+      end
+  
+      defmodule Dest do
+        use Absinthe.Schema
+  
+        query do
+          # Query type must exist
+        end
+  
+        import_types Source1, [starts_with: :fo]
+        import_types Source2, [starts_with: :fo]
+  
+        object :baz do
+          import_fields :foo
+        end
+
+      end
+
+      assert Dest.__absinthe_types__() |> Map.keys() |> Enum.member?(:bar) |> Kernel.not
+    end
   end
 
   describe "arg" do

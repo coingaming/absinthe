@@ -517,7 +517,7 @@ defmodule Absinthe.Schema.Notation do
     |> recordable!(:resolve, @placement[:resolve])
 
     quote do
-      middleware Absinthe.Resolution, unquote(func_ast)
+      middleware(Absinthe.Resolution, unquote(func_ast))
     end
   end
 
@@ -735,8 +735,7 @@ defmodule Absinthe.Schema.Notation do
     |> record_private!(owner, [{key, value}])
   end
 
-  @placement {:meta,
-              [under: [:field, :object, :input_object, :enum, :scalar, :interface, :union]]}
+  @placement {:meta, [under: [:field, :object, :input_object, :enum, :scalar, :interface, :union]]}
   @doc """
   Defines a metadata key/value pair for a custom type.
 
@@ -1244,31 +1243,78 @@ defmodule Absinthe.Schema.Notation do
   import_types MyApp.Schema.Types.{TypesA, TypesB, SubTypes.TypesC}
   ```
   """
+  defmacro import_types(type_module_ast, starts_with: prefix) do
+    env = __CALLER__
+
+    type_module_ast
+    |> Macro.expand(env)
+    |> do_import_types(env, starts_with: prefix)
+
+    :ok
+  end
+
   defmacro import_types(type_module_ast) do
     env = __CALLER__
 
     type_module_ast
     |> Macro.expand(env)
-    |> do_import_types(env)
+    |> do_import_types(env, [])
 
     :ok
   end
 
-  defp do_import_types({{:., _, [root_ast, :{}]}, _, modules_ast_list}, env) do
+  defp do_import_types({{:., _, [root_ast, :{}]}, _, modules_ast_list}, env, opts) do
     {:__aliases__, meta, root} = root_ast
 
     for {_, _, leaves} <- modules_ast_list do
       type_module = Macro.expand({:__aliases__, meta, root ++ leaves}, env)
 
       if Code.ensure_compiled?(type_module) do
-        do_import_types(type_module, env)
+        do_import_types(type_module, env, opts)
       else
         raise ArgumentError, "module #{type_module} is not available"
       end
     end
   end
 
-  defp do_import_types(type_module, env) when is_atom(type_module) do
+  defp do_import_types(type_module, env, starts_with: prefix) when is_atom(type_module) do
+    imports = Module.get_attribute(env.module, :absinthe_imports) || []
+    _ = Module.put_attribute(env.module, :absinthe_imports, [type_module | imports])
+
+    types =
+      for {ident, name} <- type_module.__absinthe_types__,
+          ident in type_module.__absinthe_exports__ do
+        if isPrefixedWith?(ident, prefix) do
+          put_definition(env.module, %Absinthe.Schema.Notation.Definition{
+            category: :type,
+            source: type_module,
+            identifier: ident,
+            attrs: [name: name],
+            file: env.file,
+            line: env.line
+          })
+
+          ident
+        end
+      end
+
+    directives =
+      for {ident, name} <- type_module.__absinthe_directives__,
+          ident in type_module.__absinthe_exports__ do
+        put_definition(env.module, %Absinthe.Schema.Notation.Definition{
+          category: :directive,
+          source: type_module,
+          identifier: ident,
+          attrs: [name: name],
+          file: env.file,
+          line: env.line
+        })
+      end
+
+    {:ok, types: types, directives: directives}
+  end
+
+  defp do_import_types(type_module, env, _opts) when is_atom(type_module) do
     imports = Module.get_attribute(env.module, :absinthe_imports) || []
     _ = Module.put_attribute(env.module, :absinthe_imports, [type_module | imports])
 
@@ -1303,13 +1349,21 @@ defmodule Absinthe.Schema.Notation do
     {:ok, types: types, directives: directives}
   end
 
-  defp do_import_types(type_module, _) do
+  defp do_import_types(type_module, _, _) do
     raise ArgumentError, """
     `#{Macro.to_string(type_module)}` is not a module
 
     This macro must be given a literal module name or a macro which expands to a
     literal module name. Variables are not supported at this time.
     """
+  end
+
+  defp isPrefixedWith?(name, prefix) do
+    prefix_str = Atom.to_string(prefix)
+
+    name
+    |> Atom.to_string()
+    |> String.starts_with?(prefix_str)
   end
 
   @placement {:import_fields, [under: [:input_object, :interface, :object]]}
